@@ -3,138 +3,198 @@ import re
 from PIL import Image
 
 # Configuration
-PROJECT_DIR = r"c:\Users\Yogesh Poonia\Desktop\Speed Ex relocation packers and movers"
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
+CODE_EXTENSIONS = ('.html', '.css', '.js', '.jsx', '.json', '.xml')
 MAX_SIZE_KB = 120
 MAX_SIZE_BYTES = MAX_SIZE_KB * 1024
-EXCLUDE_DIRS = {".git", ".gemini", ".system_generated", "scratch", "node_modules"}
 
-def scan_images(directory):
-    """Scans the directory recursively for JPG, JPEG, and PNG images."""
-    image_paths = []
-    for root, dirs, files in os.walk(directory):
-        # Exclude hidden or system directories
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith('.')]
-        for file in files:
-            ext = os.path.splitext(file)[1].lower()
-            if ext in {".jpg", ".jpeg", ".png"}:
-                image_paths.append(os.path.join(root, file))
-    return image_paths
+# Folders to completely ignore during scanning
+EXCLUDE_DIRS = {'node_modules', '.next', '.git', 'old-static-website'}
 
-def optimize_to_webp(img_path):
-    """Converts an image to WebP, compressing it dynamically to fit under MAX_SIZE_KB."""
-    base_path, ext = os.path.splitext(img_path)
-    webp_path = base_path + ".webp"
-    
+def get_optimized_webp_data(img_path):
+    """
+    Attempts to optimize and convert an image to WebP format.
+    Dynamically adjusts quality and scales down dimensions if necessary to meet the 120KB limit.
+    Returns: (bytes_data, final_width, final_height, final_quality, was_scaled)
+    """
     try:
-        # Open the image
-        img = Image.open(img_path)
-        
-        # Keep track of original format for transparency support
-        if img.mode in ("RGBA", "P") and ext.lower() == ".png":
-            img = img.convert("RGBA")
-        else:
-            img = img.convert("RGB")
-            
-        quality = 85
-        scale = 1.0
-        
-        while True:
-            # Scale down if necessary
-            if scale < 1.0:
-                new_size = (int(img.width * scale), int(img.height * scale))
-                temp_img = img.resize(new_size, Image.Resampling.LANCZOS)
+        with Image.open(img_path) as img:
+            # Convert RGBA/P to RGB if converting to WebP to prevent color loss
+            if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                # Keep alpha channel if needed, WebP supports it
+                alpha_img = img.convert('RGBA')
             else:
-                temp_img = img
+                alpha_img = img.convert('RGB')
                 
-            # Save temporary file to check size
-            temp_img.save(webp_path, "WEBP", quality=quality)
-            file_size = os.path.getsize(webp_path)
+            orig_w, orig_h = alpha_img.size
+            scale = 1.0
             
-            # Check if size is within limits
-            if file_size <= MAX_SIZE_BYTES:
-                break
-                
-            # If still too large, reduce quality
-            if quality > 40:
-                quality -= 5
-            else:
-                # If quality is already at 40, reduce scale
+            # Step 1: Try adjusting quality first (from 85 down to 30)
+            for quality in range(85, 29, -5):
+                import io
+                buf = io.BytesIO()
+                alpha_img.save(buf, format='WEBP', quality=quality)
+                data = buf.getvalue()
+                if len(data) <= MAX_SIZE_BYTES:
+                    return data, orig_w, orig_h, quality, False
+            
+            # Step 2: If still too large, dynamically scale down dimensions
+            while scale > 0.1:
                 scale -= 0.1
-                quality = 85 # reset quality for new scale
+                new_w = int(orig_w * scale)
+                new_h = int(orig_h * scale)
+                if new_w < 10 or new_h < 10:
+                    break
                 
-            if scale < 0.1:
-                # Fallback if image cannot be scaled down further
-                print(f"Warning: Could not compress {os.path.basename(img_path)} under {MAX_SIZE_KB}KB even at minimum scale.")
-                break
+                resized = alpha_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 
-        print(f"Optimized: {os.path.basename(img_path)} -> {os.path.basename(webp_path)} ({file_size/1024:.1f} KB, Quality={quality}, Scale={scale:.1f})")
-        return webp_path
+                # Try quality range again for the resized image
+                for quality in range(80, 29, -10):
+                    import io
+                    buf = io.BytesIO()
+                    resized.save(buf, format='WEBP', quality=quality)
+                    data = buf.getvalue()
+                    if len(data) <= MAX_SIZE_BYTES:
+                        return data, new_w, new_h, quality, True
+            
+            # Absolute fallback: save at lowest acceptable quality and dimension
+            import io
+            buf = io.BytesIO()
+            lowest_w = max(50, int(orig_w * 0.1))
+            lowest_h = max(50, int(orig_h * 0.1))
+            resized = alpha_img.resize((lowest_w, lowest_h), Image.Resampling.LANCZOS)
+            resized.save(buf, format='WEBP', quality=20)
+            return buf.getvalue(), lowest_w, lowest_h, 20, True
+            
     except Exception as e:
-        print(f"Error processing {img_path}: {e}")
+        print(f"Error processing image details for {img_path}: {e}")
         return None
 
-def update_references(directory, replacements):
-    """Scans code files and replaces references to old image files with new WebP paths."""
-    code_extensions = {".html", ".css", ".js", ".jsx", ".ts", ".tsx", ".json"}
-    
-    for root, dirs, files in os.walk(directory):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith('.')]
-        for file in files:
-            ext = os.path.splitext(file)[1].lower()
-            if ext in code_extensions:
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        code = f.read()
-                        
-                    original_code = code
-                    for old_name, new_name in replacements.items():
-                        # Case insensitive replacement for exact image file references
-                        # e.g., about-image.jpg -> about-image.webp
-                        pattern = re.compile(re.escape(old_name), re.IGNORECASE)
-                        code = pattern.sub(new_name, code)
-                        
-                    if code != original_code:
-                        with open(file_path, "w", encoding="utf-8") as f:
-                            f.write(code)
-                        console_msg = f"Updated references in {os.path.relpath(file_path, directory)}"
-                        print(console_msg)
-                except Exception as e:
-                    print(f"Error updating references in {file_path}: {e}")
-
 def main():
-    print("Starting Image Optimization Pipeline...")
+    import sys
+    print("=" * 80)
+    print("SPEED EX RELOCATION - IMAGE OPTIMIZER & CODE UPDATE SCRIPT")
+    print("=" * 80)
     
-    # 1. Discover images
-    images = scan_images(PROJECT_DIR)
-    print(f"Discovered {len(images)} images to process.\n")
+    dry_run = True
+    if "--execute" in sys.argv or "--no-dry-run" in sys.argv:
+        dry_run = False
+        print("\n>>> RUNNING IN EXECUTION MODE (Files will be modified and deleted) <<<\n")
+    else:
+        # Prompt safety check
+        dry_run_input = input("Perform a DRY RUN? (y/n) [Default: y]: ").strip().lower()
+        dry_run = dry_run_input != 'n'
+        
+        if dry_run:
+            print("\n>>> RUNNING IN DRY RUN MODE (No files will be modified or deleted) <<<\n")
+        else:
+            confirm = input("WARNING: This will permanently modify code files and delete original images. Proceed? (yes/no): ").strip().lower()
+            if confirm != 'yes':
+                print("Aborted.")
+                return
+
+    # 1. Discover Images
+    images_to_process = []
+    for root, dirs, files in os.walk(PROJECT_DIR):
+        # Modify dirs in-place to skip excluded folders
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        for file in files:
+            if file.lower().endswith(IMAGE_EXTENSIONS):
+                full_path = os.path.join(root, file)
+                images_to_process.append(full_path)
+
+    print(f"Found {len(images_to_process)} original image(s) to convert.")
     
-    replacements = {}
-    converted_images = []
+    # 2. Convert and Compress
+    conversions = {} # maps absolute old path -> absolute new webp path
+    name_replacements = [] # list of tuples: (old_filename_with_ext, new_filename_with_webp)
     
-    # 2. Convert and compress
-    for img_path in images:
-        webp_path = optimize_to_webp(img_path)
-        if webp_path:
-            old_name = os.path.basename(img_path)
-            new_name = os.path.basename(webp_path)
-            replacements[old_name] = new_name
-            converted_images.append(img_path)
+    for img_path in images_to_process:
+        rel_path = os.path.relpath(img_path, PROJECT_DIR)
+        base_path, ext = os.path.splitext(img_path)
+        webp_path = base_path + ".webp"
+        
+        old_filename = os.path.basename(img_path)
+        new_filename = os.path.splitext(old_filename)[0] + ".webp"
+        
+        orig_size_kb = os.path.getsize(img_path) / 1024
+        print(f"\nOptimizing: {rel_path} ({orig_size_kb:.1f} KB)")
+        
+        webp_data, w, h, q, scaled = get_optimized_webp_data(img_path)
+        if webp_data is None:
+            print(f"  [ERROR] Failed to optimize {old_filename}")
+            continue
             
-    # 3. Update code references
-    print("\nUpdating image references in source code...")
-    update_references(PROJECT_DIR, replacements)
-    
-    # 4. Cleanup original images
-    print("\nCleaning up original files...")
-    for img_path in converted_images:
-        try:
-            os.remove(img_path)
-            print(f"Deleted: {os.path.basename(img_path)}")
-        except Exception as e:
-            print(f"Error deleting {img_path}: {e}")
-            
-    print("\nImage Optimization Pipeline Completed Successfully!")
+        new_size_kb = len(webp_data) / 1024
+        print(f"  -> Target: {new_filename} ({new_size_kb:.1f} KB) | Quality: {q} | Size: {w}x{h} | Resized: {scaled}")
+        
+        if not dry_run:
+            try:
+                with open(webp_path, 'wb') as f:
+                    f.write(webp_data)
+                conversions[img_path] = webp_path
+                name_replacements.append((old_filename, new_filename))
+            except Exception as e:
+                print(f"  [ERROR] Failed to write WebP file: {e}")
+        else:
+            name_replacements.append((old_filename, new_filename))
+
+    # 3. Update Code References
+    if name_replacements:
+        print("\n" + "=" * 80)
+        print("UPDATING CODE REFERENCES")
+        print("=" * 80)
+        
+        code_files = []
+        for root, dirs, files in os.walk(PROJECT_DIR):
+            dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+            for file in files:
+                if file.lower().endswith(CODE_EXTENSIONS):
+                    code_files.append(os.path.join(root, file))
+
+        for file_path in code_files:
+            rel_file_path = os.path.relpath(file_path, PROJECT_DIR)
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                
+                updated = False
+                new_content = content
+                for old_name, new_name in name_replacements:
+                    # Case-sensitive exact match for filename references in code
+                    if old_name in new_content:
+                        new_content = new_content.replace(old_name, new_name)
+                        updated = True
+                        print(f"  Ref Match: Replacing '{old_name}' -> '{new_name}' in {rel_file_path}")
+                
+                if updated and not dry_run:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(new_content)
+                    print(f"  [UPDATED] {rel_file_path}")
+            except Exception as e:
+                print(f"  [ERROR] Failed to scan/update file {rel_file_path}: {e}")
+
+    # 4. Cleanup Original Images
+    if not dry_run and conversions:
+        print("\n" + "=" * 80)
+        print("CLEANING UP ORIGINAL IMAGES")
+        print("=" * 80)
+        for orig_path in conversions.keys():
+            rel_orig = os.path.relpath(orig_path, PROJECT_DIR)
+            try:
+                os.remove(orig_path)
+                print(f"  [DELETED] {rel_orig}")
+            except Exception as e:
+                print(f"  [ERROR] Failed to delete {rel_orig}: {e}")
+                
+    print("\n" + "=" * 80)
+    print("PROCESS COMPLETE")
+    if dry_run:
+        print("Dry run completed successfully. No changes were written to disk.")
+    else:
+        print("Image optimization, code updates, and cleanup completed successfully.")
+    print("=" * 80)
 
 if __name__ == "__main__":
     main()
