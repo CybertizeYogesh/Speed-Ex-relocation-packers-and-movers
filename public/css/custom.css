@@ -2256,8 +2256,7 @@ header.main-header .header-sticky.active{
 	.footer-logo img {
 		width: 100%;
 		max-width: 300px;
-		background: #fff;
-		border-radius: 10px;
+		background: transparent !important;
 	}
 
 .about-footer-content p{
