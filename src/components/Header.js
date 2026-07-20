@@ -37,7 +37,7 @@ export default function Header() {
             <div className="container">
               {/* Logo Start */}
               <Link className="navbar-brand" href="/">
-                <img src="/global-logo.webp" style={{ background: "#fff", borderRadius: "10px", maxWidth: "300px" }} alt="Logo" />
+                <img src="/sppedlogo.png" style={{ background: "#fff", borderRadius: "10px", maxWidth: "300px" }} alt="Speed Ex Relocation Logo" />
               </Link>
               {/* Logo End */}
 
