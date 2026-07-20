@@ -37,7 +37,7 @@ export default function Header() {
             <div className="container">
               {/* Logo Start */}
               <Link className="navbar-brand" href="/">
-                <img src="/global-logo.png" style={{ maxWidth: "300px", height: "auto" }} alt="Logo" />
+                <img src="/global-logo.webp" style={{ maxWidth: "300px", height: "auto" }} alt="Logo" />
               </Link>
               {/* Logo End */}
 

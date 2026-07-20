@@ -37,7 +37,7 @@ export default function RootLayout({ children }) {
           <div className="loading-container">
             <div className="loading"></div>
             <div id="loading-text">
-              <img src="/global-logo.png" alt="Speed Ex Relocation" />
+              <img src="/global-logo.webp" alt="Speed Ex Relocation" />
             </div>
           </div>
         </div>

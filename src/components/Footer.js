@@ -12,7 +12,7 @@ export default function Footer() {
               <div className="about-footer">
                 {/* Footer Logo Start */}
                 <div className="footer-logo">
-                  <img src="/global-logo.png" alt="Speed Ex Relocation Logo" />
+                  <img src="/global-logo.webp" alt="Speed Ex Relocation Logo" />
                 </div>
                 {/* Footer Logo End */}
 

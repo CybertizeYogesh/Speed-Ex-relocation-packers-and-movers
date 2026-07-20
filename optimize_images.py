@@ -80,9 +80,9 @@ def main():
     dry_run = True
     if "--execute" in sys.argv or "--no-dry-run" in sys.argv:
         dry_run = False
-        print("\n>>> RUNNING IN EXECUTION MODE (Files will be modified and deleted) <<<\n")
-    else:
-        # Prompt safety check
+        print("\n>>> RUNNING IN EXECUTION MODE (Files will be modified and original images deleted) <<<\n")
+    elif sys.stdin.isatty():
+        # Prompt safety check in interactive terminals
         dry_run_input = input("Perform a DRY RUN? (y/n) [Default: y]: ").strip().lower()
         dry_run = dry_run_input != 'n'
         
@@ -93,6 +93,8 @@ def main():
             if confirm != 'yes':
                 print("Aborted.")
                 return
+    else:
+        print("\n>>> RUNNING IN DRY-RUN MODE (Pass --execute to apply changes) <<<\n")
 
     # 1. Discover Images
     images_to_process = []
